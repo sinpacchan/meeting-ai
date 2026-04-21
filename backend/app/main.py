@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.services.llm_service import analyze_text
 from app.services.storage import save_result, get_result
 
@@ -59,3 +61,11 @@ def get_results(meeting_id: str):
         return {"error": "Meeting not found"}
 
     return data
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

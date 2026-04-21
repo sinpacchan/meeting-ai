@@ -1,4 +1,6 @@
 import requests
+import json
+import re
 
 def analyze_text(text: str):
     prompt = f"""
@@ -22,4 +24,23 @@ Transcript:
         }
     )
 
-    return response.json()["response"]
+    raw = response.json()["response"]
+
+    # extract JSON safely
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+
+    if not match:
+        return {
+            "summary" : "Parsing failed",
+            "action_items" : [],
+            "decisions" : []
+        }
+    
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return {
+            "summary" : "Invalid JSON from model",
+            "action_items" : [],
+            "decisions" : []
+        }
