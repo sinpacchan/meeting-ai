@@ -1,14 +1,23 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-
 from fastapi.middleware.cors import CORSMiddleware
+
+from datetime import datetime
+from uuid import uuid4
 
 from app.services.llm_service import analyze_text
 from app.services.storage import save_result, get_result
-
-from uuid import uuid4
+from app.services.tasks import save_action_items
+from app.db import get_connection
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 👇 Your input schema
 class TranscriptInput(BaseModel):
@@ -40,6 +49,8 @@ def analyze_transcript(input: AnalyzeInput):
         "result": result
     })
 
+    save_action_items(input.meeting_id, result.get("action_items", []))
+
     return {"message": "Analysis complete"}
 
 @app.post("/upload")
@@ -62,10 +73,44 @@ def get_results(meeting_id: str):
 
     return data
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.get("/tasks/{meeting_id}")
+def get_tasks(meeting_id: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT id, task, owner, deadline, status, created_at
+    FROM action_items
+    WHERE meeting_id = ?
+    """, (meeting_id,))
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": r[0],
+            "task": r[1],
+            "owner": r[2],
+            "deadline": r[3],
+            "status": r[4],
+            "created_at": r[5]
+        }
+        for r in rows
+    ]
+
+@app.post("/tasks/{task_id}/complete")
+def mark_done(task_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    UPDATE action_items
+    SET status = 'done'
+    WHERE id = ?
+    """, (task_id,))
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "Task marked as done"}
