@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +13,7 @@ from uuid import uuid4
 from app.services.llm_service import analyze_text
 from app.services.storage import save_result, get_result
 from app.services.tasks import save_action_items
+from app.services.notion_service import send_tasks_to_notion
 from app.db import get_connection
 
 app = FastAPI()
@@ -50,6 +56,8 @@ def analyze_transcript(input: AnalyzeInput):
     })
 
     save_action_items(input.meeting_id, result.get("action_items", []))
+
+    send_tasks_to_notion(result.get("action_items", []))
 
     return {"message": "Analysis complete"}
 
