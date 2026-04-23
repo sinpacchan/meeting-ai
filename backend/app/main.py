@@ -82,15 +82,14 @@ def get_results(meeting_id: str):
     return data
 
 @app.get("/tasks/{meeting_id}")
-def get_tasks(meeting_id: str):
+def get_tasks():
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-    SELECT id, task, owner, deadline, status, created_at
+    SELECT id, meeting_id, task, owner, deadline, status, created_at
     FROM action_items
-    WHERE meeting_id = ?
-    """, (meeting_id,))
+    """)
 
     rows = cursor.fetchall()
     conn.close()
@@ -98,11 +97,12 @@ def get_tasks(meeting_id: str):
     return [
         {
             "id": r[0],
-            "task": r[1],
-            "owner": r[2],
-            "deadline": r[3],
-            "status": r[4],
-            "created_at": r[5]
+            "meeting_id": r[1],
+            "task": r[2],
+            "owner": r[3],
+            "deadline": r[4],
+            "status": r[5],
+            "created_at": r[6]
         }
         for r in rows
     ]
@@ -122,3 +122,44 @@ def mark_done(task_id: int):
     conn.close()
 
     return {"message": "Task marked as done"}
+
+@app.get("/meetings")
+def get_meetings():
+    # if you're using in-memory storage:
+    from app.services.storage import storage
+    return storage
+
+@app.get("/tasks/overdue")
+def get_overdue_tasks():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    now = datetime.utcnow().isoformat()
+
+    cursor.execute("""
+    SELECT id, task, owner, deadline, status
+    FROM action_items
+    WHERE status = 'pending'
+    AND deadline IS NOT NULL
+    """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    overdue = []
+
+    for r in rows:
+        deadline = r[3]
+        try:
+            if deadline and deadline < now:
+                overdue.append({
+                    "id": r[0],
+                    "task": r[1],
+                    "owner": r[2],
+                    "deadline": deadline,
+                    "status": r[4]
+                })
+        except:
+            continue
+
+    return overdue

@@ -1,17 +1,45 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 function App() {
   const [text, setText] = useState("");
   const [meetingId, setMeetingId] = useState(null);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+
   const [tasks, setTasks] = useState([]);
+  const [meetings, setMeetings] = useState({});
+  const [allTasks, setAllTasks] = useState([]);
+  const [overdue, setOverdue] = useState([]);
+
+  const API = "http://127.0.0.1:8000";
 
   // -------------------------
-  // Load tasks from backend
+  // Load dashboard data
+  // -------------------------
+  const loadDashboard = async () => {
+    try {
+      //console.log("ALL TASKS:", t);
+      const m = await fetch(`${API}/meetings`).then(r => r.json());
+      const t = await fetch(`${API}/tasks`).then(r => r.json());
+      const o = await fetch(`${API}/tasks/overdue`).then(r => r.json());
+
+      setMeetings(m);
+      setAllTasks(Array.isArray(t) ? t : t.tasks || []);
+      setOverdue(Array.isArray(o) ? o : o.tasks || []);
+    } catch (err) {
+      console.error("Dashboard error:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
+  // -------------------------
+  // Load tasks for one meeting
   // -------------------------
   const loadTasks = async (id) => {
-    const res = await fetch(`http://127.0.0.1:8000/tasks/${id}`);
+    const res = await fetch(`${API}/tasks/${id}`);
     const data = await res.json();
     setTasks(data);
   };
@@ -23,61 +51,63 @@ function App() {
     setLoading(true);
 
     try {
-      // 1. Upload
-      const uploadRes = await fetch("http://127.0.0.1:8000/upload", {
+      // Upload
+      const uploadRes = await fetch(`${API}/upload`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
 
-      const uploadData = await uploadRes.json();
-      const id = uploadData.meeting_id;
+      const { meeting_id } = await uploadRes.json();
+      setMeetingId(meeting_id);
 
-      setMeetingId(id);
-
-      // 2. Analyze
-      await fetch("http://127.0.0.1:8000/analyze", {
+      // Analyze
+      await fetch(`${API}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meeting_id: id }),
+        body: JSON.stringify({ meeting_id }),
       });
 
-      // 3. Get structured results
-      const res = await fetch(`http://127.0.0.1:8000/results/${id}`);
+      // Get results
+      const res = await fetch(`${API}/results/${meeting_id}`);
       const data = await res.json();
-
       setResult(data);
 
-      // 4. Load DB tasks (source of truth)
-      await loadTasks(id);
+      // Load tasks (DB = truth)
+      await loadTasks(meeting_id);
+
+      // Refresh dashboard
+      await loadDashboard();
+
     } catch (err) {
-      console.error("Error:", err);
+      console.error("Analyze error:", err);
     }
 
     setLoading(false);
   };
 
   // -------------------------
-  // Mark task as done
+  // Mark task done
   // -------------------------
   const markDone = async (taskId) => {
-    await fetch(`http://127.0.0.1:8000/tasks/${taskId}/complete`, {
+    await fetch(`${API}/tasks/${taskId}/complete`, {
       method: "POST",
     });
 
-    // refresh tasks
     await loadTasks(meetingId);
+    await loadDashboard();
   };
 
   // -------------------------
   // UI
   // -------------------------
   return (
-    <div style={{ padding: 40, maxWidth: 800, margin: "auto" }}>
+    <div style={{ padding: 40, maxWidth: 900, margin: "auto" }}>
       <h1>Meeting AI</h1>
 
+      {/* INPUT */}
       <textarea
-        rows={10}
+        rows={8}
         style={{ width: "100%" }}
         placeholder="Paste meeting transcript..."
         value={text}
@@ -90,14 +120,13 @@ function App() {
         {loading ? "Analyzing..." : "Analyze"}
       </button>
 
-      {/* ---------------- SUMMARY ---------------- */}
+      {/* ================= CURRENT RESULT ================= */}
       {result && (
         <div style={{ marginTop: 30 }}>
           <h2>Summary</h2>
           <p>{result.summary}</p>
 
-          {/* ---------------- DECISIONS ---------------- */}
-          <h2>Decisions</h2>
+          <h3>Decisions</h3>
           <ul>
             {result.decisions?.map((d, i) => (
               <li key={i}>{d}</li>
@@ -106,36 +135,22 @@ function App() {
         </div>
       )}
 
-      {/* ---------------- TASKS (DB SOURCE OF TRUTH) ---------------- */}
+      {/* ================= MEETING TASKS ================= */}
       {tasks.length > 0 && (
         <div style={{ marginTop: 30 }}>
           <h2>Action Items</h2>
 
           {tasks.map((task) => (
-            <div
-              key={task.id}
-              style={{
-                padding: 10,
-                marginBottom: 10,
-                border: "1px solid #ddd",
-                borderRadius: 6,
-              }}
-            >
-              <div>
-                <strong>{task.task}</strong> — {task.owner}
-              </div>
-
+            <div key={task.id} style={cardStyle}>
+              <strong>{task.task}</strong> — {task.owner}
+              <br />
               <small>
-                Status: {task.status}
-                {task.deadline ? ` | Due: ${task.deadline}` : ""}
+                {task.status} {task.deadline && `| due: ${task.deadline}`}
               </small>
 
               {task.status === "pending" && (
                 <div>
-                  <button
-                    onClick={() => markDone(task.id)}
-                    style={{ marginTop: 5 }}
-                  >
+                  <button onClick={() => markDone(task.id)}>
                     Mark Done
                   </button>
                 </div>
@@ -144,8 +159,57 @@ function App() {
           ))}
         </div>
       )}
+
+      {/* ================= DASHBOARD ================= */}
+
+      {/* Meetings */}
+      <div style={{ marginTop: 40 }}>
+        <h2>Past Meetings</h2>
+        <ul>
+          {Object.entries(meetings).map(([id, m]) => (
+            <li key={id}>
+              {id.slice(0, 8)} — {m.status}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* All Tasks */}
+      <div style={{ marginTop: 30 }}>
+        <h2>All Tasks</h2>
+        <ul>
+          {Array.isArray(allTasks) && allTasks.map(t => (
+            <li key={t.id}>
+              {t.task} — {t.owner} [{t.status}]
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Overdue */}
+      <div style={{ marginTop: 30 }}>
+        <h2>⚠️ Overdue Tasks</h2>
+        {overdue.length === 0 ? (
+          <p>No overdue tasks 🎉</p>
+        ) : (
+          <ul>
+            {overdue.map(t => (
+              <li key={t.id}>
+                🔴 {t.task} — {t.owner} (due: {t.deadline})
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
+
+const cardStyle = {
+  padding: 10,
+  marginBottom: 10,
+  border: "1px solid #ddd",
+  borderRadius: 6,
+};
 
 export default App;
